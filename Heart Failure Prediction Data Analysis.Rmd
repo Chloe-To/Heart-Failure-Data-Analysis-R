@@ -1,0 +1,886 @@
+---
+title: "Heart Failure Prediction Data Analysis"
+output: pdf_document
+---
+Project by Chloe To, Jocelyn Ong, Shu Hui Loh, Anson Koay
+
+## <b> Abstract </b>
+Cardiovascular Diseases (CVD) has been the leading cause of death globally, with an estimated 17.9 million related deaths in 2019. Through accurate and early detection, we can manage the impact of CVD and can help to reduce the large number of deaths. This paper aims to use 4 Machine Learning models to classify if one has CVD. Based on our results, we can see that LASSO has the best interpretable model with an accuracy of 86.32%.
+
+# <b>Introduction </b>
+According to the World Health Organisation, CVD is a range of disorders of the heart and blood vessels, such as coronary heart disease and cerebrovascular diseases and are the leading cause of death globally [(WHO,2021](https://www.who.int/news-room/fact-sheets/detail/cardiovascular-diseases-(cvds))). They are mainly caused by fatty deposits lining the inner walls of the blood vessels, causing a blockage that results in a lower amount of blood flowing through the brain or heart, leading to stroke [(mayoclinic,2022](https://www.mayoclinic.org/diseases-conditions/stroke/symptoms-causes/syc-20350113#:~:text=There%20are%20two%20main%20causes,doesn't%20cause%20lasting%20symptoms.)) and heart attack[(mayoclinic,2022](https://www.mayoclinic.org/diseases-conditions/heart-attack/symptoms-causes/syc-20373106)) respectively, where CVD is responsible for approximately 17.9 million deaths in 2019 and in Singapore, 21 people die from CVD every day [(Singapore Heart Foundation,n.d.](https://www.myheart.org.sg/health/heart-disease-statistics/#:~:text=In%20Singapore%2C%2021%20people%20die,to%20heart%20diseases%20or%20stroke.)). If these diseases are left unattended, it would lead to an increase in healthcare expenditure as well as mortality rates. Early detection helps prevent complications or the disease from deteriorating even more as it would mean life and death.
+
+Hence, this project aims to use the following classification machine learning models: LASSO, $k$-Nearest Neighbors (kNN), Decision Tree, Random Forest, Gradient Boosting, Adaptative Boosting as well as Extreme Gradient Boosting (XGB) to allow us to determine patterns between the predictors and presence of heart disease. We took the top three models with the highest accuracy and then took into consideration the interpretability of each model to determine the best classification model(s) that enables us to better predict the presence of CVD. We hope that by doing so, we can help an individual detect and manage the condition early.
+
+Currently, there has been research done on machine learning in detecting CVD using random forests [(Buettner et al.,2019](https://doi.org/10.1109/HealthCom46333.2019.9009429)), however, we have decided to explore other algorithms to see if they are as able or offer any improvements.
+
+# Description of dataset
+## Heart Failure Prediction Dataset
+
+This dataset was openly sourced from Kaggle [(Fedesoriano,2021](https://www.kaggle.com/datasets/fedesoriano/heart-failure-prediction?datasetId=1582403&sortBy=voteCount)) and was created by combining five independently available datasets with 11 common features. The five datasets that were combined to create this dataset are:
+
+*   Cleveland: 303 observations
+*   Hungarian: 294 observations
+*   Switzerland: 123 observations
+*   Long Beach VA: 200 observations
+*   Stalog (Heart) Data Set: 270 observations
+
+Total: 1190 observations
+
+Duplicated: 272 observations
+
+Final dataset (after removing duplications): 918 observations
+
+The common features in the dataset are:
+1. Age: age of the patient [Years]
+2. Sex: sex of the patient [M: Male, F: Female]
+3. ChestPainType: chest pain type [TA: Typical Angina, ATA: Atypical Angina, NAP: Non-Anginal Pain, ASY: Asymptomatic]
+4. RestingBP: resting blood pressure [mm Hg]
+5. Cholesterol: serum cholesterol [mm/dl]
+6. FastingBS: fasting blood sugar [1: if FastingBS > 120 mg/dl, 0: otherwise]
+7. RestingECG: resting electrocardiogram results [Normal: Normal, ST: having ST-T wave abnormality (T wave inversions and/or ST elevation or depression of > 0.05 mV), LVH: showing probable or definite left ventricular hypertrophy by Estes' criteria]
+8. MaxHR: maximum heart rate achieved [Numeric value between 60 and 202]
+9. ExerciseAngina: exercise-induced angina [Y: Yes, N: No]
+10. Oldpeak: oldpeak = ST [Numeric value measured in depression]
+11. ST_Slope: the slope of the peak exercise ST segment [Up: upsloping, Flat: flat, Down: downsloping]
+12. HeartDisease: output class [1: heart disease, 0: normal]
+
+# Import Data and Libraries
+```{r}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(dplyr)
+library(psych)
+library(Boruta)
+library(gower)
+library(caret)
+library(cluster)
+library(class)
+library(missForest)
+library(GGally)
+library(tidyr)
+library(party)
+
+heart <- read.csv("C:/Users/Chloe/Documents/Coding/Data Analysis - Machine Learning/Heart Failure Prediction/heart.csv")
+set.seed(4510)
+```
+
+# Summary Statistics and Structure of Each Predictor
+```{r}
+# Summary Statistics of Each Predictor
+summary(heart)
+
+cat("Dimension of Dataset ", dim(heart))
+
+# Structure of Each Predictor
+str(heart)
+```
+
+# Exploratory Data Analysis
+
+```{r}
+heart$Sex[heart$Sex == "F"] = 1
+heart$Sex[heart$Sex == "M"] = 0
+```
+
+```{r}
+# For exploratory data analysis only:
+heart$FastingBS[heart$FastingBS == 0] = "otherwise"
+heart$FastingBS[heart$FastingBS == 1] = "FastingBS > 120 mg/dl"
+```
+
+```{r}
+# Plot correlation matrix
+pairs.panels(heart,
+             method = "pearson", # correlation method
+             hist.col = "#00AFBB",
+             density = TRUE,  # show density plots
+             ellipses = TRUE # show correlation ellipses
+)
+```
+From the pairs plot above, we can observe that there are some non-zero correlation coefficients between some of the predictors and the response variable. This implies that the predictors and the response variable are not completely independent from one another. <br>
+
+Based on the pairs plot, Heart Disease is most negatively correlated with ST_Slope, with a correlation coefficient of -0.56, while ExerciseAngina is the most positively correlated variable with Heart Disease with a correlation coefficient of 0.49.
+
+The following bar charts and box plots are plotted to visualise our dataset clearly. We will be comparing between people who have heart disease and people who do not have heart disease, known as normal people. Each variable is investigated individually and plotted against the variable “HeartDisease” to look out for possible outliers and patterns between our response variable and features.
+
+```{r}
+C = table(heart$ChestPainType, heart$HeartDisease)
+
+barplot(C,
+        legend.text = TRUE,
+        beside = TRUE,
+        main = "Which Chest Pain Type is one of the cause for heart disease?",
+        xlab = "Heart Disease event",
+        ylab = "Number of patients",
+        names = c('Normal','Heart Disease'))
+```
+
+From the barplot above, we can see that ASY (asymptomatic) chest pain type which refers to the absence of chest pain [(Loskot & Novotny,1990](https://pubmed.ncbi.nlm.nih.gov/2238747/#:~:text=Silent%20(asymptomatic)%20myocardial%20ischemia%20(,or%20the%20usual%20anginal%20equivalents.))), is the most common among heart disease individuals as ASY chest pain was an indicator of heart disease [(Rollefstad et al.,2015](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4639740/)) while ATA chest pain is slightly more common among the other chest pain types for normal individuals.
+
+```{r}
+F = table(heart$FastingBS, heart$HeartDisease)
+
+barplot(F,
+        legend.text = TRUE, ylim = c(0,500),
+        beside = TRUE,
+        main = "Is high Fasting Blood Sugar one of the cause for heart disease?",
+        xlab = "Heart Disease event",
+        ylab = "Number of patients",
+        names = c('Normal','Heart Disease'))
+```
+
+FastingBS refers to fasting blood sugar, which refers to an overnight fast (not eating). If individuals have a blood sugar of 99 mg/dl or lower, they are considered normal, 100 to 125 mg/dl indicates you have prediabetes while 126mg/dl and above indicates you have diabetes [(cdc.gov,2021](https://www.cdc.gov/diabetes/basics/getting-tested.html#:~:text=Fasting%20Blood%20Sugar%20Test,higher%20indicates%20you%20have%20diabetes.)).
+Based on the barplot above, both normal individuals and those with heart disease often have a $FastingBS \le 120 mg/dl$, so there does not seem to be a particular relationship between fasting blood sugar levels and heart disease.
+
+```{r}
+R = table(heart$RestingECG, heart$HeartDisease)
+
+barplot(R,
+        legend.text = TRUE, xlim = c(0,10),
+        beside = TRUE,
+        main = "Which RestingECG results is one of the cause for heart disease?",
+        xlab = "Heart Disease event",
+        ylab = "Number of patients",
+        names = c('Normal','Heart Disease'))
+```
+
+RestingECG refers to a test measuring the electrical activity of the heart [(physimed](https://www.physimed.com/accueil-patients/diagnostic-techniques/resting-ecg/?lang=en#:~:text=The%20resting%20electrocardiogram%20is%20a,node%2C%20the%20heart's%20natural%20pacemaker.)), with LVH referring to left ventricular hypertrophy [(Mayoclinic,2022](https://www.mayoclinic.org/diseases-conditions/left-ventricular-hypertrophy/symptoms-causes/syc-20374314#:~:text=Left%20ventricular%20hypertrophy%20is%20a,cause%20is%20high%20blood%20pressure.)) and ST referring to the region between the end of ventricular depolarization and beginning of ventricular repolarization on the ECG [(Kashou et al., 2022](https://www.ncbi.nlm.nih.gov/books/NBK459364/#:~:text=The%20ST%20segment%20encompasses%20the,beginning%20of%20the%20T%20wave.)). This aid us in detecting heart disease as the electrocardiogram (ECG) helps to detect the electric signals produced by the heart when it beats, hence abnormalies detected might indicate heart diseas [(nhs,2021](https://www.nhs.uk/conditions/electrocardiogram/#:~:text=Sensors%20attached%20to%20the%20skin,see%20if%20they're%20unusual.)).
+
+Based on the barplot above, there seems to be a similar proportion in the amount of normal individuals and those with heart disease that have LVH and normal RestingECG, but a slightly higher proportion of ST detected for people with heart disease.
+
+```{r}
+S = table(heart$ST_Slope, heart$HeartDisease)
+
+barplot(S,
+        legend.text = TRUE, xlim = c(0,9.5),
+        beside = TRUE,
+        main = "Which slope of the peak exercise ST segment is one of the cause for heart disease?",
+        xlab = "Heart Disease event",        ylab = "Number of patients",
+        names = c('Normal','Heart Disease'))
+```
+
+The ST segment shown above encompasses the region between the end of ventricular depolarization and beginning of ventricular repolarization on the ECG. In other words, it corresponds to the area from the end of the QRS complex to the beginning of the T wave.
+
+Based on the plot above, a flat peak exercise ST segment is most common among individuals with heart disease, while an up peak exercise ST segment is most common among normal individuals.
+
+```{r}
+A = table(heart$ExerciseAngina, heart$HeartDisease)
+
+barplot(A,
+        legend.text = TRUE, xlim = c(0,7.5),
+        beside = TRUE,
+        main = "Is having exercised angina one of the cause for heart disease?",
+        xlab = "Heart Disease event",
+        ylab = "Number of patients",
+        names = c('Normal','Heart Disease'))
+```
+
+Exercise Angina refers to the chest pain felt when exercising which is a common symptom in people who suffer from coronary heart disease, caused by cholesterol or fatty deposits clogging the blood vessels [(health.harvard.edu,2021](https://www.health.harvard.edu/heart-health/angina-symptoms-diagnosis-and-treatments#:~:text=September%2021%2C%202021,by%20cholesterol%2Dclogged%20coronary%20arteries.)).
+
+Based on the barplots above, those suffering from heart disease often have exercise angina as a cause of heart disease while it is the opposite for nomal individuals.
+
+```{r}
+ggplot(data = heart, aes(x = HeartDisease, y = MaxHR, group = HeartDisease)) +
+  geom_boxplot()
+```
+From the boxplots above, we can see that normal individuals have a higher medium maximum heart rate of about 150 as compared to those who suffer heart disease of about 126. The upper and lower quartiles of normal individuals are similar but the upper quartile of heart disease individuals is higher than that of the lower quartile. Both types of individuals have outliers present, but not removed as heartbeats above 200 beats per minute is considered dangerous but still invalid observations [(medicinenet.com2022](https://www.medicinenet.com/what_heart_rate_is_too_high/article.htm)). Hence no observations are not removed.
+
+```{r}
+ggplot(data = heart, aes(x = HeartDisease, y = Oldpeak, group = HeartDisease)) +
+  geom_boxplot()
+```
+Oldpeak refers to ST depression induced by exercise relative to rest (‘ST’ relates to positions on the ECG plot) [(Deshmukh,2020)](https://towardsdatascience.com/heart-disease-uci-diagnosis-prediction-b1943ee835a7#:~:text=oldpeak%3A%20ST%20depression%20induced%20by,major%20vessels%20(0%E2%80%933)))).
+
+From the boxplot, we can see that the median of Oldpeak for normal individuals is 0 compared to 1.23 for heart disease individuals. Normal individuals' boxplot has a lower quartile of 0 but has a lot of outliers, while heart disease individuals has a larger lower quartile with fewer outliers, but the outliers are not removed since they are still valid observations as shown in the table below. As Oldpeak is a non-negative values, observations with $Oldpeak<0$ are considered invalid, hence we will inpute these values later on.
+
+```{r}
+cat("Number of invalid Oldpeak observations =", sum(heart$Oldpeak < 0))
+```
+```{r}
+#![Classification of Old Peak](~/Coding/Data Analysis - Machine Learning/Heart Failure Prediction/CLASSIFICATION-OF-OLD-PEAK.png)
+```
+
+
+Reference: A Fuzzy Expert System for Heart Disease Diagnosis - Scientific Figure on ResearchGate. Available from: https://www.researchgate.net/figure/CLASSIFICATION-OF-OLD-PEAK_tbl2_44260568 [accessed 12 Sep, 2024]
+
+```{r}
+ggplot(data = heart, aes(x = HeartDisease, y =  RestingBP, group, group = HeartDisease)) +
+  geom_boxplot()
+```
+
+RestingBP is a measurement of heartbeats when the heart is at rest between beats, resulting in a drop in blood pressure. It is calculated as systolic/diastolic
+
+Based on the  boxplots above, we can see that normal individuals have a median RestingBP of about 125 while heart disease individuals have a median RestingBP of about 127. Normal individuals have smaller quartiles compared to heart disease individuals. Both types of individuals have outliers, but based on the blood pressure chart shown below, we can notice that it is possible for an individual to have a resting blood pressure of >180 mm Hg, should the person be suffering from an hypertensive crisis. Thus, our outliers values are considered valid and should be included in our future analysis.
+
+Furthermore, we can observe that if someone's $RestingBP=0$, the person's heart is not beating and thus is not alive. Therefore, it is important that such invalid observations are identified and input later on.
+
+```{r}
+cat("Number of invalid RestingBP observations =", sum(heart$RestingBP == 0))
+```
+
+```{r}
+ggplot(data = heart, aes(x = HeartDisease, y = Cholesterol, group = HeartDisease)) +
+  geom_boxplot()
+```
+Cholesterol is a waxy substance that is used for making hormones, vitamin D and substances to help digest food. However, too much of cholesterol is bad for as it would combine with other substances in our blood to form plaque which will stick to the walls of our blood vessels, leading to coronary heart disease due to the narrowing of our blood vessels [(mediplus](https://medlineplus.gov/cholesterol.html)). Our dataset refers cholesterol as serum cholesterol, which refers to amount of total cholesterol in one's blood. Healthy serum cholestero level should be below 200 mg/dl [(healthline.com,2017](https://www.healthline.com/health/butter-cholesterol#management)).
+
+From the boxplots above, we can see that normal individuals have a slightly higher median cholesterol level of about 220 while heart disease individuals have a median cholesterol level of about 210. However, normal individuals have smaller boxplot quartiles compared to heart disease individuals. There are outliers for normal individuals, however it could be possible that these individuals suffer from high cholesterol. Thus we did not remove such valid observations.
+
+```{r}
+cat("Number of invalid Cholesterol observations =", sum(heart$Cholesterol == 0))
+```
+Since cholesterol is always present in our body, the 172 observations with $Cholesterol=0$ are deemed invalid and will be imputed later.
+
+The higher a person's blood cholesterol, the more of an issue it is. With reference to our dataset, most of the individuals have borderline high cholesterol, but it should not be 0, hence those are deemed invalid.
+
+Reference: https://www.singhealth.com.sg/patient-care/conditions-treatments/cholesterol-management
+
+By observing how the invalid observations have led to a distortion in our dataset, our group decided to use random forest imputations to replace these values. However, as imputating values is a part of training, it will be shown later, after splitting the data into training and test sets.
+
+# Data Pre-processing
+
+## One-Hot Encoding
+
+One-hot encoding refers to converting categorical variables into numerical dummy features that could be provided to machine learning algorithms to aid the algorithms in predicting better [(Vasudev,2017](https://hackernoon.com/what-is-one-hot-encoding-why-and-when-do-you-have-to-use-it-e3c6186d008f))
+
+We perform one-hot encoding to transform our categorical features into a numerical representation. This allows us to use these features in our models to help predict if one has CVD, as most machine learning algorithms are unable to handle categorical variables until they are converted into numerical variables.
+This will be used for our feature selection later on.
+
+For this dataset, we will encode the following categorical variables: Sex, ChestPainType, RestingECG, ExercsieAngina, ST_Slope.
+
+```{r}
+dmy <- dummyVars(" ~ .", data = heart, fullRank = T)
+heart <- data.frame(predict(dmy, heart))
+head(heart)
+```
+
+```{r}
+# Split 80% Train and 20% Test Set
+
+ind <- runif(nrow(heart)) <= 0.80
+train_data <- heart %>% filter(ind)
+test_data <- heart %>% filter(!ind)
+cat("Dimension of Training Data =", dim(train_data), "\n")
+cat("Dimension of Test Data =", dim(test_data), "\n")
+```
+
+```{r}
+# Update invalid observations to NA in both train and test set
+
+train_data$Cholesterol[train_data$Cholesterol==0] <- NA
+train_data$RestingBP[train_data$RestingBP==0] <- NA
+train_data$Oldpeak[train_data$Oldpeak<0] <- NA
+cat("Number of invalid Cholesterol observations in train data =", sum(is.na(train_data$Cholesterol)), "\n")
+cat("Number of invalid RestingBP observations in train data =", sum(is.na(train_data$RestingBP)), "\n")
+cat("Number of invalid Oldpeak observations in train data =", sum(is.na(train_data$Oldpeak)), "\n")
+
+test_data$Cholesterol[test_data$Cholesterol==0] <- NA
+test_data$RestingBP[test_data$RestingBP==0] <- NA
+test_data$Oldpeak[test_data$Oldpeak<0] <- NA
+cat("\nNumber of invalid Cholesterol observations in test data =", sum(is.na(test_data$Cholesterol)), "\n")
+cat("Number of invalid RestingBP observations in test data =", sum(is.na(test_data$RestingBP)), "\n")
+cat("Number of invalid Oldpeak observations in test data =", sum(is.na(test_data$Oldpeak)))
+```
+## Impute invalid observations using MissForest package
+MissForest is a random forest imputation algorithm for missing data, which is done by imputing all missing data using mean or mode, then for each variable with missing values, MissForest fits a random forest on the observed data and predicts the missing data [(Morgan,2020](https://rpubs.com/lmorgan95/MissForest)).
+
+As our dataset consists of both categorical and numerical data, our group decided to use missForest, which is able to work on mixed-type data and does not require any pre-processing and assumptions required.
+
+Reference: https://cran.r-project.org/web/packages/missForest/missForest.pdf
+
+### How missForest works
+As we have 16 predictors,  $\lfloor\sqrt{16}\rfloor = 4$ predictors are randomly sampled at each split of the random forest.
+
+#### Stopping Criterion
+When the difference between iteration $i$ and $i+1$ of the imputed matrices begins to increase for categorical and numerical variables. <br>
+OR <br>
+After 10 iterations. <br>
+
+### Pseudo Code for missForest Algorithm <br>
+1. Make an initial guess for the missing categorical/numerical values using mode/mean.
+2. $K$ is the vector of column indices in our dataset matrix ($X$) and is sorted in ascending order of the percentage missing. <br>
+Whilst the stopping criterion is not met:
+3. $X^{imp}_{old}$ stores the previous imputed matrix.
+<br>
+for $s$ in $K$:
+1.  Fit a random forest predicting the non-missing values of $X$.
+2. Use this to predict the missing values of $X$.
+3. $X^{imp}_{new}$ is the updated imputed matrix with the predicted values. <br>
+stop after this is done for all $s$ in $K$.
+7. When the stopping criterion is met, return the final imputed matrix.
+
+```{r}
+imp_train_X <- missForest(train_data)$ximp
+summary(imp_train_X)
+
+imp_test_X <- missForest(test_data)$ximp
+summary(imp_test_X)
+```
+
+From the statistical summary, we can observe that the minimum for Cholesterol and RestingBP are non-zero values and the minimum for Oldpeak is non-negative now.
+
+## Feature Selection using Boruta
+Boruta is a feature selection algorithm, which acts as a wrapper algorithm around Random Forest [(analyticsvidhya,2016](https://www.analyticsvidhya.com/blog/2016/03/select-important-variables-boruta-package/)). Boruta helps in feature selection, which is a method of reducing number of input variables and using relevant data while removing noise.
+
+Reference: https://www.datacamp.com/tutorial/feature-selection-R-boruta
+
+### Pseudo Code for Boruta Algorithm <br>
+1. Duplicates the dataset.
+2. Shuffles the values in each columm, which are now called shadow features.
+3. Trains the random forest classifier on the dataset.
+4. Through the mean decrease accuracy, we can see the importance of each feature.
+5. Iterates through the real features - if feature has a higher Z-score than the maximum Z-score of the shadow features, it records this in a vector. These values are called hits.
+6. A table of hits is produced after a predefined set of iterations.
+7. At every iteration, Boruta compares the Z-scores of the shadow features and the original features to see which performs better.
+8. If the original features have a better Z-score than the shuffled features, Boruta will mark the feature as important.
+9. A feature is rejected and removed from dataset if it hasn't been recorded as a hit in a set amount of iterations.
+10. Algorithm stops after a set number of iterations or until all the features have been accepted or rejected.
+
+```{r}
+# Variable selection, filtering out the most important features from your dataset
+feature_select <- Boruta(HeartDisease ~ ., data = imp_train_X, doTrace = 1)
+feature_select$finalDecision
+print(feature_select)
+```
+After our categorical variables have been imputed, we have 15 variables. After using Boruta for feature selection, 3 variables are rejected and we are left with 12 variables, which will be used for our models.
+
+```{r}
+pairs.panels(imp_train_X,
+             method = "pearson", # correlation method
+             hist.col = "#00AFBB",
+             density = TRUE,  # show density plots
+             ellipses = TRUE # show correlation ellipses
+             )
+```
+
+Based on the plot above, we can see that ExerciseAnginaY is still the most positively correlated with HeartDisease with a value of 0.49 while ST_SlopeUp is the most negatively correlated with HeartDisease at -0.61.
+
+```{r}
+plot(feature_select, xlab = "", xaxt = "n")
+lz<-lapply(1:ncol(feature_select$ImpHistory),function(i)
+  feature_select$ImpHistory[is.finite(feature_select$ImpHistory[,i]),i])
+names(lz) <- colnames(feature_select$ImpHistory)
+Labels <- sort(sapply(lz,median))
+axis(side = 1,las=2,labels = names(Labels),
+       at = 1:ncol(feature_select$ImpHistory), cex.axis = 0.7)
+```
+
+From the plot above, we can see that Oldpeak instead has the highest importance  with ST_SlopeUp being 2nd most important followed by ExerciseAnginaY. The variables with importance in green are selected, while predictor variables whose importance are lower 'ShadowMax' are to be removed.
+
+```{r}
+imp_train_X %>% ggcorr(palette = "RdBu", label = T)
+```
+
+From the correlation matrix above, we can see the correlation between variables, with ST_SlopeUP having the highest positive correlation HeartDisease and ExerciseAngina being the most negatively correlated to HeartDisease.
+
+```{r}
+heart_fin = heart[, !names(heart) %in% c("ChestPainTypeTA", "RestingECGNormal", "Cholesterol","RestingECGST")]
+train_data = imp_train_X[, !names(imp_train_X) %in% c("ChestPainTypeTA", "RestingECGNormal", "Cholesterol","RestingECGST")]
+test_data = imp_test_X[, !names(imp_test_X) %in% c("ChestPainTypeTA", "RestingECGNormal", "Cholesterol","RestingECGST")]
+
+cat("Dimension of whole dataset =", dim(heart_fin), "\n")
+cat("Dimension of train data =",dim(train_data), "\n")
+cat("Dimension of train data =", dim(test_data), "\n")
+```
+
+We then created a final dataset after imputation and feature selection and split our data into training and test data. Upon splitting, we have 738 training data and 180 test data, which will be used in our models.
+
+# Modelling
+
+```{r}
+train_pred = train_data[, !names(train_data) %in% c("HeartDisease")]
+train_response = as.factor(train_data$HeartDisease)
+train_data$HeartDisease = as.factor(train_data$HeartDisease)
+
+error_rate <- function(model, dataset=test_data) {
+  cm <- model %>%
+    predict(dataset) %>%
+    confusionMatrix(as.factor(dataset$HeartDisease))
+
+  c(test_error = unname(1 - cm$overall['Accuracy']))
+}
+```
+
+## LASSO
+
+```{r}
+lambda <- 10^seq(-4, 0 , length = 20)
+lambda
+
+start_time <- Sys.time()
+lasso <- train(
+  HeartDisease ~., data = train_data, method = "glmnet",
+  trControl = trainControl("cv", number = 10),
+  tuneGrid = expand.grid(alpha = 1, lambda = lambda),
+  preProcess = c("scale")
+)
+end_time <- Sys.time()
+
+lasso
+```
+
+After normalising and cross-validation, we can see that keeping our tuning parameter 'alpha' constant at 1, our lambda=0.00483293 would give us the highest accuracy, which will be used for our model.
+
+```{r}
+lasso$bestTune
+
+coef(lasso$finalModel, lasso$bestTune$lambda)
+
+lambda_for_plotting <- 10^seq(from = -2, to = 2, length = 100)
+lasso_coefs <- coef(lasso$finalModel, lambda_for_plotting) %>%
+  as.matrix %>% t %>% as_tibble %>%
+  mutate(lambda = lambda_for_plotting)
+
+head(lasso_coefs)
+
+lasso_coefs %>%
+  pivot_longer(Age:ST_SlopeUp, names_to = "variable", values_to = "coef") %>%
+  ggplot(aes(x = lambda, y = coef, group = variable, colour = variable)) +
+  geom_line() + scale_x_log10()
+
+best_lasso <- train(
+  HeartDisease ~., data = train_data, method = "glmnet",
+  trControl = trainControl("cv", number = 10),
+  tuneGrid = expand.grid(alpha = 1, lambda = lasso$bestTune$lambda),
+  preProcess = c("scale")
+)
+
+best_lasso
+```
+From above, we can see that the accuracy for our model is 0.8631803.
+
+```{r}
+plot(lasso, main = "Lasso Regression")
+
+plot(varImp(lasso,scale=TRUE))
+
+error_rate(best_lasso)
+```
+## K-Nearest Neighbour
+
+```{r}
+k=10
+start_time <- Sys.time()
+kNN_model <- train(HeartDisease ~ .,
+  train_data,
+  method = 'knn',
+  preProcess = c("center","scale"), tuneLength = 20,
+  trControl = trainControl(method = 'cv', number = k))
+end_time <- Sys.time()
+
+kNN_model
+
+cat("Best hyper-parameter k value = 17")
+```
+
+This means that the outcome of the prediction for whether or not an individual has heart disease is based on the consensus of the 17 closest observations.
+
+```{r}
+# Predicting on test data
+kNN_y_pred <- predict(kNN_model, newdata = test_data)
+
+cat("Time taken for KNN to predict 177 observations =", end_time - start_time)
+```
+```{r}
+# Confusion Matrix
+kNN_cm <- table(test_data$HeartDisease,kNN_y_pred)
+print(kNN_cm)
+```
+```{r}
+# Model Evaluation
+kNN_confm <- confusionMatrix(as.factor(kNN_y_pred), as.factor(test_data$HeartDisease))
+kNN_confm
+```
+```{r}
+#Accuracy of model
+cat("Accuracy of the kNN model =", kNN_confm$overall['Accuracy'],"\n")
+```
+## Decision Tree
+
+```{r}
+library(rpart) # for training decision trees
+library(rpart.plot) # for plotting decision trees
+
+start_time <- Sys.time()
+tree_model <- rpart(HeartDisease ~ . , data = train_data)
+rpart.plot(tree_model)
+```
+
+From this decision tree, we can see how a new observation would be labeled depending on their values for the displayed features. If they receive a label "1", they are predicted to have heart disease. <br>
+
+Oldpeak refers to ST depression induced by exercise relative to rest as seen in the Exploratory Data Anlaysis. ST_SlopeUP refers to the upward slope on the electrocardiogram which has been increasingly seen as a sign of CVD [(Misumida et al.,2015](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5295568/)), while Sex1 refers to females. <br>
+
+The root node of this decision tree is ST_SlopeUP, which indicates to us that this is the most significant predictor out of all of them according to this classification model. <br>
+
+Out of the terminal nodes where the individual is predicted to have heart disease, the majority of them are predicted as so if they do not have an ST_SlopeUP equal to 1 and if their maximum heart rate is less than 151 bpm. <br>
+
+From the terminal nodes where the individual is predicted to not have heart disease (label='0'), we can see that the majority of these predictions occur when the individual's ST_SlopeUP is equal to 1 and when the Oldpeak is greater than or equal to 0.49. <br>
+
+```{r}
+tree_model$frame
+```
+
+```{r}
+# Predicting on test data
+tree_y_pred <- predict(tree_model, newdata = test_data, type = "class")
+```
+
+```{r}
+# Confusion Matrix
+tree_cm <- table(test_data$HeartDisease,tree_y_pred)
+print(tree_cm)
+```
+
+```{r}
+# Model Evaluation
+tree_confm <- confusionMatrix(as.factor(tree_y_pred), as.factor(test_data$HeartDisease))
+tree_confm
+```
+```{r}
+#Accuracy of model
+cat("Accuracy of the Decision Tree model =", tree_confm$overall['Accuracy'],"\n")
+```
+### Post pruning: prune the tree with the optimal CP value
+
+```{r}
+plotcp(tree_model)
+
+tree_model$cptable
+
+opt_cp <- tree_model$cptable[which.min(tree_model$cptable[ , 'xerror']) , 'CP']
+opt_cp
+
+tree_model_pruned <- prune.rpart(tree_model, opt_cp)
+tree_model_pruned
+```
+
+```{r}
+# Predicting on test data
+tree_pruned_y_pred <- predict(tree_model_pruned, newdata = test_data, type = "class")
+end_time <- Sys.time()
+
+cat("Time taken for Decision Tree to predict 177 observations =", end_time - start_time)
+```
+```{r}
+# Confusion Matrix
+tree_pruned_cm <- table(test_data$HeartDisease,tree_pruned_y_pred)
+print(tree_pruned_cm)
+```
+```{r}
+# Model Evaluation
+tree_pruned_confm <- confusionMatrix(as.factor(tree_pruned_y_pred), as.factor(test_data$HeartDisease))
+tree_pruned_confm
+```
+```{r}
+#Accuracy of model
+cat("Accuracy of the Decision Tree model (after pruning) =", tree_pruned_confm$overall['Accuracy'],"\n")
+
+```
+## Random Forest
+
+```{r}
+library(ranger) # for training random forest
+
+rfGrid <- expand.grid(mtry = c(1 : 11),
+                      min.node.size = c(5, 10, 20, 40),
+                      splitrule = "gini")
+start_time <- Sys.time()
+mod_rf_tune <- train(HeartDisease ~ . , data = train_data, method = "ranger",
+                num.trees = 50,
+                importance = 'impurity',
+                tuneGrid = rfGrid,
+                trControl = trainControl("oob"))
+end_time <- Sys.time()
+
+mod_rf_tune
+
+mod_rf_tune$bestTune
+
+mod_rf_tuned <- train(as.factor(HeartDisease) ~ . , data = train_data, method = "ranger",
+                num.trees = 500,
+                importance = 'impurity',
+                tuneGrid = expand.grid(mod_rf_tune$bestTune),
+                trControl = trainControl("oob"))
+mod_rf_tuned
+
+mod_rf_matrix <- mod_rf_tuned %>% predict(test_data) %>%
+  confusionMatrix(as.factor(test_data$HeartDisease))
+
+mod_rf_y_pred <- predict(mod_rf_tuned, newdata = test_data)
+
+cat("Time taken for xgboost to predict 177 observations =", end_time - start_time)
+```
+```{r}
+# Confusion Matrix
+mod_rf_cm <- table(test_data$HeartDisease,mod_rf_y_pred)
+print(mod_rf_cm)
+```
+```{r}
+#Accuracy of model
+mod_rf_accuracy <- mod_rf_matrix$overall['Accuracy']
+cat("Overall accuracy of the model =", mod_rf_accuracy,"\n")
+
+plot(varImp(mod_rf_tuned), top = 11)
+```
+
+From this plot, we can see that ST_SlopeUp, Oldpeak and MaxHR are the most important features of our dataset according to the random forest model.
+
+## Boosting techniques
+1. Gradient Descent
+2. Adaptive Boosting
+3. Extreme Gradient Boosting
+
+are sequential ensemble technique in which the model is improved using the information from previously grown weaker model (i.e. each predictor is trained using the residual errors of the predecessor as labels)
+
+### Gradient Boosting
+
+Gradient boosting is a type of machine learning boosting. It relies on the intuition that the best possible next model, when combined with previous models, minimizes the overall prediction error. The key idea is to set the target outcomes for this next model in order to minimize the error.
+
+Gradient boosting involves three elements:
+
+1. A loss function to be optimized.
+2. A weak learner to make predictions.
+3. An additive model to add weak learners to minimize the loss function.
+
+The main aim of this algorithm is to build models sequentially and these subsequent models try to reduce the errors of the previous model. This is done by building a new model on the errors or residuals of the previous model.
+
+### Gradient Boosting Algorithm:
+
+1. Calculate the average of the response variable
+2. Calculate the residuals of each sample
+3. Construct a decision tree with the aim of predicting the residuals.
+4. Predict the response variable using all the trees within the ensemble'
+5. Compute the new residuals
+6. Repeat step 3-5 until the number of iterations is reached
+7. once trained, use all trees in the ensemble to make a final prediction to get a value of the response variable. The final prediction value is equal to the mean from step 1 and all the residuals predicted by the trees that make up the forest multiplied by the learning rate.
+
+```{r}
+library(gbm)
+
+# train a model using our training data
+start_time <- Sys.time()
+model_gbm = gbm(HeartDisease ~.,
+              data = train_data,
+              distribution = "multinomial",
+              cv.folds = 10,
+              shrinkage = .01,
+              n.minobsinnode = 10,
+              n.trees = 500)       # 500 tress to be built
+end_time <- Sys.time()
+
+summary(model_gbm)
+```
+From the plot above, we can see that ST_SlopeUP has a high relative influence, followed by ExerciseAngina, which is consistent with our observations.
+
+```{r}
+#use model to make predictions on test data
+gbm_pred_test = predict.gbm(object = model_gbm,
+                   newdata = test_data,
+                   n.trees = 500,           # 500 tress to be built
+                   type = "response")
+
+cat("Time taken for Gradient Boosting to predict 177 observations =", end_time - start_time)
+gbm_pred_test
+```
+
+```{r}
+# Give class names to the highest prediction value.
+gbm_class_names = colnames(gbm_pred_test)[apply(gbm_pred_test, 1, which.max)]
+gbm_result = data.frame(test_data$HeartDisease, gbm_class_names)
+
+print(gbm_result)
+```
+
+```{r}
+# Create confusion matrix
+gbm_conf_mat = confusionMatrix(as.factor(test_data$HeartDisease), as.factor(gbm_class_names))
+print(gbm_conf_mat)
+```
+```{r}
+#Accuracy of model
+cat("Accuracy of the Gradient Boosting model =", gbm_conf_mat$overall['Accuracy'],"\n")
+```
+### Adaptive Boosting(Adaboost)
+
+Adaptive Boosting (Adaboost) algorithm, is a Boosting technique used as an Ensemble Method in Machine Learning. The weights are re-assigned to each instance, with higher weights assigned to incorrectly classified instances. Boosting helps to reduce bias as well as variance for supervised learning by working on the principle of learners growing sequentially. With exception for the first, each subsequent learner is grown from previously grown learners. In Adaboost, a decision stump or stump refers to a decision trees with a single split.
+
+Adaboost steps:
+
+Step 1: A weak classifier such as a decision stump is made on top of the training data based on the weighted samples. Here, the weights of each sample indicate how important it is to be correctly classified. Initially, for the first stump, we give all the samples equal weights.
+
+Step 2: We create a decision stump for each variable and see how well each stump classifies samples to their target classes. We then look at how many samples are correctly or incorrectly classified for each individual stump.
+
+Step 3: More weight is assigned to the incorrectly classified samples so that they're classified correctly in the next decision stump. Weight is also assigned to each classifier based on the accuracy of the classifier, which means higher accuracy will lead to higher weight
+
+Step 4: Repeat from Step 2 until all the data points have been correctly classified, or the maximum iteration level has been reached.
+
+```{r}
+library(adabag)
+
+# train a model using our training data
+start_time <- Sys.time()
+adaboost_model <- boosting(HeartDisease~., data=train_data, boos=TRUE, mfinal = 50, control = rpart.control(minsplit = 0))
+end_time <- Sys.time()
+
+summary(adaboost_model)
+```
+```{r}
+#use model to make predictions on test data
+pred_test = predict(adaboost_model, test_data)
+
+cat("Time taken for adaboost to predict 177 observations =", end_time - start_time)
+```
+```{r}
+# Returns the prediction values of test data along with the confusion matrix
+pred_test
+```
+
+```{r}
+#Accuracy of model
+cat("Accuracy of the adaboost model =", 1- pred_test$error,"\n")
+```
+
+### Extreme Gradient Boosting
+
+Extreme gradient boosting (XGboost) is a decision-based ensemble machine learning algorithm that uses a gradient boosting framework. Comparing to gradient boosting, XGboost improves upon the base Gradient Boosting framework through system optimisations and algorithmic enhancements:
+
+System optimizations:
+- Parallelization
+- Tree Pruning
+- Hardware optimization
+
+Algorithmic enhancements:
+- Regularization
+- Sparsity Awareness
+- Weighted Quantile Sketch
+- Cross validation
+
+XGboost steps:
+1. Make an initial prediction and calculate residuals
+2. Build an XGboost tree
+Each tree starts with a single leaf and all residuals go into that leaf, then a similarity score is calculated.
+<br>
+Similarity score = $\frac{(sum of residuals)^{2}}{number of residuals+lambda}$
+<br>
+ (Lambda) is a regularization parameter that reduces the prediction's sensitivity to individual observation abnd prevent overfitting. After splitting into left and right leaves, the similarity score is calculated. To see if how betterthe residuals are compared to the roots, Gain is calculated.
+<br>
+Gain = $Left_{similarity}+Right_{similarity}-Root_{similarity}$
+<br>
+The split with the greatest gain value is used as initial split, then the it is used as the root note and is split to find the greatest positive gain value.
+3.Prune the tree
+Pruning helps to prevent overfitting by using a bottom-up approach to check if the split is valid, using Gamma. If gamma is positive, the split is kept, otherwise removed.
+4. Calculate the output values of leaves
+A single output value is then calculated to prevent leaf nodes giving multiple outputs.
+<br>
+Output Value= $\frac{sum of residals}{number of residuals+lambda}$
+<br>
+5.Make new predictions
+New predictions of the model is made using this formula:
+<br>
+$initial predicted value + eta - output value$
+<br>
+where eta is the XGboost learning rate.
+6. Calculate residuals using the new predictions
+7. Repeat step 2-6
+The process is repeated until the residuals are very small values or the maximum number of iterations set for the algorithm is met. If the tree build at each iteration is $T_i$, where $i$ is the current iteration, the formula to calculate the predictions are:
+<br>
+$initial predicted value+eta*$$T_1$+eta*$T_2$+eta*$T_3$+...+eta*$T_i$
+<br>
+
+```{r}
+library(e1071)
+library(xgboost)
+
+train_pred = data.matrix(train_data[,-12])
+train_Y = data.matrix(train_data[,12])
+
+test_pred = data.matrix(test_data[,-12])
+test_Y =  data.matrix(test_data[,12])
+
+xgboost_train = xgb.DMatrix(data=train_pred, label=train_Y)
+xgboost_test = xgb.DMatrix(data=test_pred, label=test_Y)
+
+start_time <- Sys.time()
+xgboost_model <- xgboost(data = xgboost_train, # the data
+                 max.depth=3, # max depth
+                 nrounds=50, # maximum number of iterations
+                 nthread = 2, #number of thread used in training
+                 eta = 0.1, # controls the rate at which our model learns patterns in data, smaller-> more robust ot overfitting
+                 objective = "binary:logistic")
+end_time <- Sys.time()
+
+summary(xgboost_model)
+```
+
+```{r}
+#use model to make predictions on test data
+xgboost_pred_test = predict(xgboost_model, xgboost_test)
+
+cat("Time taken for xgboost to predict 177 observations =", end_time - start_time)
+xgboost_pred_test
+```
+
+```{r}
+# Convert prediction to class
+xgboost_pred <- as.numeric(xgboost_pred_test > 0.5)
+print(xgboost_pred)
+
+xgboost_conf_mat = confusionMatrix(as.factor(test_Y), as.factor(xgboost_pred))
+xgboost_conf_mat
+```
+
+```{r}
+#Accuracy of model
+cat("Accuracy of the Xgboost model =", gbm_conf_mat$overall['Accuracy'],"\n")
+```
+# Conclusion
+
+# Summary of Model Accuracies
+
+Model                  | Accuracy    | Computational Time| Interpretable?
+-----------------------|-------------|-------------------|---------------
+LASSO Regression       | 0.8631618   |                   | Yes
+K-Nearest Neighbour*   | 0.8611111   | 0.01175165        | No
+Decision Tree (pruned) | 0.7944444   | 0.005302668       | Yes
+Random Forest          | 0.8444444   | 0.03449225        | No
+Gradient Boosting      | 0.8555556   | 0.009945631       | No
+Ada Boosting           | 0.8388889   | 0.1299751         | No
+Xgboost                | 0.8555556   | 0.004634857       | No
+
+To decide which model would be the best in solving our problem, there are a few factors that we have considered:
+1. Accuracy
+<br>
+Comparing the models from above, we can see that in the table, the 3 models with the highest accuracies are LASSO, followed by KNN and Gradient Boosting as well as XGboost.<br>
+<br>
+2. Interpretability
+<br>
+Interpretability refers to how easy it is for one to comprehend why certain predictions and decision are made, as well as whether the output of the model can be visualised such that one is able to read it without difficulty. Comparing our models, we can see that only decision tree and LASSO is interpretable. Interpretability is an important factor for our model especially in the healthcare sector as the results from the model must be easily understood so that doctors can read and trust machine learning results, hence saving time to undergo medical procedures to detect if one has CVD. If we were to select a model without considering interpretability, and the model might be a black box, which refers to the machine learning model obtaining results without explaining or showing how they are obtained, it might be difficult for doctors to accept it as they do not have evidence and may result in inaccurate diagnosis.
+
+Hence, considering these two factors, the best model to solve our problem would be LASSO. This however is not consistent with the previous research done as the model that they had used was random forest. As such, we hope that this project would serve as a good comparison to show that LASSO is a better option over random forest in detecting CVD.
+
+We should explore more interpretable models such as SHapley Additive exPlanations (SHAP), Local Interpretable Model-agnostic Explanations (LIME) and Explain Like I'm 5 (ELI5) because in the field of healthcare, if our model were to output that an individual does not have heart disease, but in actual fact, the person do have heart disease, it could lead to a delay in treatment. Hence, exploring explainable AI techniques for predicting heart disease could be a future point of research for us to embark and explore.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
