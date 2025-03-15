@@ -1,1 +1,3 @@
 # Heart-Failure-Data-Analysis-R
+
+This project aims to use the following classification machine learning models: LASSO, $k$-Nearest Neighbors (kNN), Decision Tree, Random Forest, Gradient Boosting, Adaptative Boosting as well as Extreme Gradient Boosting (XGB) to allow us to determine patterns between the predictors and presence of heart disease. We took the top three models with the highest accuracy and then took into consideration the interpretability of each model to determine the best classification model(s) that enables us to better predict the presence of CVD. We hope that by doing so, we can help an individual detect and manage the condition early.
